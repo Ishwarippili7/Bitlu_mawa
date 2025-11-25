@@ -67,6 +67,7 @@ class BitluMawaBot:
             CommandHandler("stats", self.stats),
             CommandHandler("listvideos", self.list_videos),
             CommandHandler("broadcast", self.broadcast),
+            CommandHandler("testsub", self.test_subscription),
             MessageHandler(filters.ALL & ~filters.COMMAND, self.handle_inputs),
             CallbackQueryHandler(self.button_callback),
         ]
@@ -97,38 +98,51 @@ class BitluMawaBot:
         except Exception as e:
             logger.error(f"Error saving videos_data.json: {e}")
 
-    # ---------------- FORCE SUBSCRIPTION ----------------
+    # ---------------- FORCE SUBSCRIPTION (FIXED) ----------------
 
     async def check_subscription(self, user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
         try:
+            # Admin ki always allow
             if user_id in ADMIN_IDS:
                 return True
                 
+            logger.info(f"Checking subscription for user {user_id} in {FORCE_SUB_CHANNEL}")
+            
             bot = context.bot
             try:
+                # Channel lo user unte check cheyyali
                 member = await bot.get_chat_member(FORCE_SUB_CHANNEL, user_id)
                 status = member.status
-                logger.info(f"User {user_id} status in channel: {status}")
                 
+                logger.info(f"User {user_id} channel status: {status}")
+                
+                # Member, Admin, or Creator unte allow
                 if status in ["member", "administrator", "creator"]:
+                    logger.info(f"User {user_id} is subscribed - ALLOWING ACCESS")
                     return True
                 else:
-                    logger.info(f"User {user_id} not subscribed. Status: {status}")
+                    logger.warning(f"User {user_id} not subscribed. Status: {status}")
                     return False
                     
             except BadRequest as e:
-                if "user not found" in str(e).lower():
-                    logger.info(f"User {user_id} not found in channel")
+                error_msg = str(e).lower()
+                if "user not found" in error_msg:
+                    logger.warning(f"User {user_id} not found in channel - NOT SUBSCRIBED")
                     return False
-                elif "bot is not a member" in str(e).lower():
-                    logger.error("Bot is not admin in the channel!")
-                    return True  # Allow access if bot can't check
+                elif "bot is not a member" in error_msg:
+                    logger.error("❌ BOT IS NOT ADMIN IN THE CHANNEL! Please make bot admin in @gullymovies")
+                    # Temporary allow access for testing
+                    return True
+                elif "chat not found" in error_msg:
+                    logger.error(f"❌ CHANNEL NOT FOUND: {FORCE_SUB_CHANNEL} - Check channel username")
+                    return False
                 else:
-                    logger.error(f"Error checking subscription: {e}")
+                    logger.error(f"BadRequest in subscription check: {e}")
                     return False
-                
+                    
         except Exception as e:
-            logger.error(f"Error in check_subscription: {e}")
+            logger.error(f"Unexpected error in check_subscription: {e}")
+            logger.error(traceback.format_exc())
             return False
 
     async def send_force_sub_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE, deep_arg: Optional[str] = None):
@@ -169,6 +183,34 @@ class BitluMawaBot:
         except Exception as e:
             logger.error(f"Error in send_force_sub_message: {e}")
 
+    # ---------------- TEST SUBSCRIPTION COMMAND ----------------
+
+    async def test_subscription(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Test force subscription for debugging"""
+        user_id = update.effective_user.id
+        user_name = update.effective_user.first_name
+        
+        await update.message.reply_text(
+            f"🔍 *Subscription Test for {user_name}*\n\n"
+            f"👤 User ID: `{user_id}`\n"
+            f"📢 Channel: {FORCE_SUB_CHANNEL}\n"
+            f"👑 Admin: {'✅ Yes' if user_id in ADMIN_IDS else '❌ No'}\n\n"
+            "Checking subscription status...",
+            parse_mode="Markdown"
+        )
+        
+        is_subscribed = await self.check_subscription(user_id, context)
+        
+        if is_subscribed:
+            await update.message.reply_text("✅ *SUBSCRIBED!* - You can access all content!")
+        else:
+            await update.message.reply_text(
+                "❌ *NOT SUBSCRIBED!* - Please join our channel!\n\n"
+                "Join: @gullymovies\n"
+                "Then click: /testsub again to verify",
+                parse_mode="Markdown"
+            )
+
     # ---------------- START COMMAND ----------------
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -206,7 +248,8 @@ class BitluMawaBot:
                 "/addvideo - Add new video\n"
                 "/listvideos - View videos\n"
                 "/stats - Bot statistics\n"
-                "/broadcast - Send message to all users\n\n"
+                "/broadcast - Send message to all users\n"
+                "/testsub - Test subscription\n\n"
                 "🚀 Bot is ready to serve!"
             ) if user_id in ADMIN_IDS else (
                 f"🎉 *Welcome {user_name} to Bitlu Mawa🔥!*\n\n"
